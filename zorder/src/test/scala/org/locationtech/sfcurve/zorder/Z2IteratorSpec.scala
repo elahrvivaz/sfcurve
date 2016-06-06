@@ -16,7 +16,7 @@ class Z2IteratorSpec extends FunSpec with Matchers {
     it("iterates"){
       val min = Z2(5,3)
       val max = Z2(10,5)
-      val range = Z2Range(min, max)
+      val range = Z2.zRange(min, max)
       val it = new ZdivideIterator(min, max)
 
       it foreach { z2: Z2 =>
@@ -64,7 +64,7 @@ class Z2Iterator(min: Z2, max: Z2) extends Iterator[Z2] {
  */
 case class ZdivideIterator(min: Z2, max: Z2) extends Z2Iterator(min, max)  {
   val MAX_MISSES = 10
-  val range = Z2Range(min, max)
+  val range = Z2.zRange(min, max)
   var haveNext = false
   var _next: Z2 = new Z2(0)
 
