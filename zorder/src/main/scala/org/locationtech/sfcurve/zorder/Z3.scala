@@ -9,6 +9,8 @@ package org.locationtech.sfcurve.zorder
 
 import org.locationtech.sfcurve.IndexRange
 
+import scala.collection.mutable.ArrayBuffer
+
 class Z3(val z: Long) extends AnyVal {
   import Z3._
 
@@ -106,77 +108,129 @@ object Z3 {
     wiped | (split(p) << dim)
   }
 
-  // base our recursion on the depth of the tree that we get 'for free' from the common prefix
-  // these numbers generally result in 500-3000 ranges being returned
-  def getMaxRecurse(commonBits: Int): Int = if (commonBits < 30) 7 else if (commonBits < 40) 6 else 5
-
   /**
-   * Recurse down the oct-tree and report all z-ranges which are contained
-   * in the cube defined by the min and max points
-   *
-   * @param min lower bound
-   * @param max upper bound
-   * @param precision bit precision of the z-values. can be used to stop searching after
-   *                  considering a certain number of bits.
-   * @return
-   */
-  def zranges(min: Z3, max: Z3, precision: Int = 64, maxRecursion: Option[Int] = None): Seq[IndexRange] = {
-    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(min.z, max.z)
+    * Calculates the longest common binary prefix between two z longs
+    *
+    * @return (common prefix, number of bits in common)
+    */
+  def longestCommonPrefix(values: Long*): ZPrefix = {
+    var bitShift = Z3.TOTAL_BITS - Z3.MAX_DIM
+    var head = values.head >>> bitShift
+    while (values.tail.forall(v => (v >>> bitShift) == head) && bitShift > -1) {
+      bitShift -= Z3.MAX_DIM
+      head = values.head >>> bitShift
+    }
+    bitShift += Z3.MAX_DIM // increment back to the last valid value
+    ZPrefix(values.head & (Long.MaxValue << bitShift), 64 - bitShift)
+  }
 
-    // base our recursion on the depth of the tree that we get 'for free' from the common prefix
-    val maxRecurse = maxRecursion.getOrElse(getMaxRecurse(commonBits))
+  def zranges(zbounds: Array[Z3Range],
+              precision: Int = 64,
+              maxRanges: Option[Int] = None,
+              maxRecurse: Option[Int] = None): Seq[IndexRange] = {
 
-    val searchRange = Z3Range(min, max)
-    var mq = new MergeQueue // stores our results
+    // calculate the common prefix in the z-values - we start processing with the first diff
+    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min.z, b.max.z)): _*)
 
-    def checkOct(prefix: Long, offset: Int, oct: Long, level: Int): Unit = {
+    val rangeStop = maxRanges.getOrElse(Int.MaxValue)
+    val recurseStop = maxRecurse.getOrElse(7)
+
+    // stores our results
+    val ranges = new java.util.ArrayList[IndexRange](100)
+
+    var offset = 64 - commonBits
+
+    val levelTerminator = (-1L, -1L)
+    val remaining = new java.util.ArrayDeque[(Long, Long)](100)
+
+    def isContained(range: Z3Range): Boolean = {
+      var i = 0
+      while (i < zbounds.length) {
+        if (zbounds(i).containsInUserSpace(range)) {
+          return true
+        }
+        i += 1
+      }
+      false
+    }
+
+    def overlaps(range: Z3Range): Boolean = {
+      var i = 0
+      while (i < zbounds.length) {
+        if (zbounds(i).overlapsInUserSpace(range)) {
+          return true
+        }
+        i += 1
+      }
+      false
+    }
+
+    def checkValue(prefix: Long, oct: Long): Unit = {
       val min: Long = prefix | (oct << offset) // QR + 000...
       val max: Long = min | (1L << offset) - 1 // QR + 111...
       val octRange = Z3Range(new Z3(min), new Z3(max))
 
-      if (searchRange.containsInUserSpace(octRange) || offset < 64 - precision) {
+      if (isContained(octRange) || offset < 64 - precision) {
         // whole range matches, happy day
-        mq += IndexRange(octRange.min.z, octRange.max.z, contained = true)
-      } else if (searchRange overlapsInUserSpace octRange) {
-        if (level < maxRecurse && offset > 0) {
-          // some portion of this range is excluded
-          // let our children work on each subrange
-          val nextOffset = offset - MAX_DIM
-          val nextLevel = level + 1
-          checkOct(min, nextOffset, 0, nextLevel)
-          checkOct(min, nextOffset, 1, nextLevel)
-          checkOct(min, nextOffset, 2, nextLevel)
-          checkOct(min, nextOffset, 3, nextLevel)
-          checkOct(min, nextOffset, 4, nextLevel)
-          checkOct(min, nextOffset, 5, nextLevel)
-          checkOct(min, nextOffset, 6, nextLevel)
-          checkOct(min, nextOffset, 7, nextLevel)
-        } else {
-          // bottom out - add the entire range so we don't miss anything
-          mq += IndexRange(octRange.min.z, octRange.max.z, contained = false)
+        ranges.add(IndexRange(octRange.min.z, octRange.max.z, contained = true))
+      } else if (overlaps(octRange)) {
+        // some portion of this range is excluded
+        // queue up each sub-range for processing
+        remaining.add((min, max))
+      }
+    }
+
+    // initial level
+    checkValue(commonPrefix, 0)
+    remaining.add(levelTerminator)
+    offset -= Z3.MAX_DIM
+
+    var level = 0
+
+    while (level < recurseStop && offset >= 0 && !remaining.isEmpty && ranges.size < rangeStop) {
+      val next = remaining.poll
+      if (next.eq(levelTerminator)) {
+        if (!remaining.isEmpty) {
+          level += 1
+          offset -= Z3.MAX_DIM
+          remaining.add(levelTerminator)
+        }
+      } else {
+        val prefix = next._1
+        var oct = 0L
+        while (oct < 8) {
+          checkValue(prefix, oct)
+          oct += 1
         }
       }
     }
 
-    // kick off recursion over the narrowed space
-    checkOct(commonPrefix, 64 - commonBits, 0, 0)
-
-    // return our aggregated results
-    mq.toSeq
-  }
-
-  /**
-   * Calculates the longest common binary prefix between two z longs
-   *
-   * @return (common prefix, number of bits in common)
-   */
-  def longestCommonPrefix(lower: Long, upper: Long): ZPrefix = {
-    var bitShift = TOTAL_BITS - MAX_DIM
-    while ((lower >>> bitShift) == (upper >>> bitShift) && bitShift > -1) {
-      bitShift -= MAX_DIM
+    // bottom out and get all the ranges that partially overlapped but we didn't fully process
+    while (!remaining.isEmpty) {
+      val (min, max) = remaining.poll
+      if (min != -1) {
+        ranges.add(IndexRange(min, max, contained = false))
+      }
     }
-    bitShift += MAX_DIM // increment back to the last valid value
-    ZPrefix(lower & (Long.MaxValue << bitShift), 64 - bitShift)
+
+    ranges.sort(IndexRange.IndexRangeIsOrdered)
+
+    var current = ranges.get(0)
+    val result = ArrayBuffer.empty[IndexRange]
+    var i = 1
+    while (i < ranges.size()) {
+      val range = ranges.get(i)
+      if (range.lower <= current.upper + 1) {
+        current = IndexRange(current.lower, math.max(current.upper, range.upper), current.contained && range.contained)
+      } else {
+        result.append(current)
+        current = range
+      }
+      i += 1
+    }
+    result.append(current)
+
+    result
   }
 
   /**
