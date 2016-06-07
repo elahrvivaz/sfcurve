@@ -12,7 +12,7 @@ import org.locationtech.sfcurve.IndexRange
 
 import scala.collection.mutable.ArrayBuffer
 
-trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
+trait ZN[ZRangeT <: ZRange[ZRangeT]] {
 
   // number of bits used to store each dimension
   def BitsPerDimension: Int
@@ -24,10 +24,7 @@ trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
   def MaxMask: Long
 
   // has to be lazy to allow for initialization in extending traits
-  lazy val TotalBits = BitsPerDimension * Dimensions
-
-  // number of quadrants in our quad/oct tree
-  private lazy val Quadrants = math.pow(2, Dimensions)
+  def TotalBits = BitsPerDimension * Dimensions
 
   /**
     * Insert (Dimensions - 1) zeros between each bit to create a zvalue from a single dimension.
@@ -53,8 +50,7 @@ trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
     * @param max max value in range
     * @return
     */
-  private [sfcurve] def zRange(min: Long, max: Long): ZRangeT =
-    ZRange(min, max, Dimensions).asInstanceOf[ZRangeT]
+  private [sfcurve] def zRange(min: Long, max: Long): ZRangeT
 
   /**
     * Decode a single dimension
@@ -63,7 +59,8 @@ trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
     * @param dimension dimensino to decode - must be in the range [0, Dimensions)
     * @return
     */
-  private [sfcurve] def decode(z: Long, dimension: Int): Int = combine(z >> dimension)
+  private [sfcurve] def decode(z: Long, dimension: Int): Int =
+    if (dimension == 0) combine(z) else combine(z >> dimension)
 
   /**
     * Returns (litmax, bigmin) for the given range and point
@@ -96,125 +93,7 @@ trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
   def zranges(zbounds: Array[ZRangeT],
               precision: Int = 64,
               maxRanges: Option[Int] = None,
-              maxRecurse: Option[Int] = Some(ZObject.DefaultRecurse)): Seq[IndexRange] = {
-
-    import ZObject.LevelTerminator
-
-    // stores our results - initial size of 100 in general saves us some re-allocation
-    val ranges = new java.util.ArrayList[IndexRange](100)
-
-    // values remaining to process - initial size of 100 in general saves us some re-allocation
-    val remaining = new java.util.ArrayDeque[(Long, Long)](100)
-
-    // calculate the common prefix in the z-values - we start processing with the first diff
-    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min, b.max)): _*)
-
-    var offset = 64 - commonBits
-
-    // checks if a range is contained in the search space
-    def isContained(range: ZRangeT): Boolean = {
-      var i = 0
-      while (i < zbounds.length) {
-        if (zbounds(i).containsInUserSpace(range)) {
-          return true
-        }
-        i += 1
-      }
-      false
-    }
-
-    // checks if a range overlaps the search space
-    def overlaps(range: ZRangeT): Boolean = {
-      var i = 0
-      while (i < zbounds.length) {
-        if (zbounds(i).overlapsInUserSpace(range)) {
-          return true
-        }
-        i += 1
-      }
-      false
-    }
-
-    // checks a single value and either:
-    //   eliminates it as out of bounds
-    //   adds it to our results as fully matching, or
-    //   queues up it's children for further processing
-    def checkValue(prefix: Long, quadrant: Long): Unit = {
-      val min: Long = prefix | (quadrant << offset) // QR + 000...
-      val max: Long = min | (1L << offset) - 1 // QR + 111...
-      val quadrantRange = zRange(min, max)
-
-      if (isContained(quadrantRange) || offset < 64 - precision) {
-        // whole range matches, happy day
-        ranges.add(IndexRange(quadrantRange.min, quadrantRange.max, contained = true))
-      } else if (overlaps(quadrantRange)) {
-        // some portion of this range is excluded
-        // queue up each sub-range for processing
-        remaining.add((min, max))
-      }
-    }
-
-    // initial level - we just check the single quadrant
-    checkValue(commonPrefix, 0)
-    remaining.add(LevelTerminator)
-    offset -= Dimensions
-
-    // level of recursion
-    var level = 0
-
-    val rangeStop = maxRanges.getOrElse(Int.MaxValue)
-    val recurseStop = maxRecurse.getOrElse(ZObject.DefaultRecurse)
-
-    while (level < recurseStop && offset >= 0 && !remaining.isEmpty && ranges.size < rangeStop) {
-      val next = remaining.poll
-      if (next.eq(LevelTerminator)) {
-        // we've fully processed a level, increment our state
-        if (!remaining.isEmpty) {
-          level += 1
-          offset -= Dimensions
-          remaining.add(LevelTerminator)
-        }
-      } else {
-        val prefix = next._1
-        var quadrant = 0L
-        while (quadrant < Quadrants) {
-          checkValue(prefix, quadrant)
-          quadrant += 1
-        }
-      }
-    }
-
-    // bottom out and get all the ranges that partially overlapped but we didn't fully process
-    while (!remaining.isEmpty) {
-      val minMax = remaining.poll
-      if (!minMax.eq(LevelTerminator)) {
-        ranges.add(IndexRange(minMax._1, minMax._2, contained = false))
-      }
-    }
-
-    // we've got all our ranges - now reduce them down by merging overlapping values
-    ranges.sort(IndexRange.IndexRangeIsOrdered)
-
-    var current = ranges.get(0) // note: should always be at least one range
-    val result = ArrayBuffer.empty[IndexRange]
-    var i = 1
-    while (i < ranges.size()) {
-      val range = ranges.get(i)
-      if (range.lower <= current.upper + 1) {
-        // merge the two ranges
-        current = IndexRange(current.lower, math.max(current.upper, range.upper), current.contained && range.contained)
-      } else {
-        // append the last range and set the current range for future merging
-        result.append(current)
-        current = range
-      }
-      i += 1
-    }
-    // append the last range - there will always be one left that wasn't added
-    result.append(current)
-
-    result
-  }
+              maxRecurse: Option[Int] = Some(ZN.DefaultRecurse)): Seq[IndexRange]
 
   /**
    * Cuts Z-Range in two and trims based on user space, can be used to perform augmented binary search
@@ -327,9 +206,9 @@ trait ZObject[ZRangeT <: ZRange[ZRangeT]] {
   }
 }
 
-object ZObject {
+object ZN {
   // indicator that we have searched a full level of the quad/oct tree
-  private val LevelTerminator = (-1L, -1L)
+  val LevelTerminator = (-1L, -1L)
 
   val DefaultRecurse = 7
 }
