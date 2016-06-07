@@ -13,13 +13,11 @@ package org.locationtech.sfcurve.zorder
  */
 case class Z3Range(min: Z3, max: Z3) {
 
-  require(min.z <= max.z, s"Not: $min < $max")
+  require(min.z <= max.z, s"Not: $min <= $max")
 
-  def mid: Z3 = Z3((max.z - min.z) / 2)
+  def mid: Z3 = Z3((max.z + min.z) >>> 1) // overflow safe mean
 
-  def length: Int = (max.z - min.z + 1).toInt
-
-  def zdivide(xd: Z3): (Z3, Z3) = Z3.zdivide(xd, min, max)
+  def length: Long = max.z - min.z + 1
 
   // contains in index space (e.g. the long value)
   def contains(bits: Z3): Boolean = bits.z >= min.z && bits.z <= max.z
@@ -46,6 +44,4 @@ case class Z3Range(min: Z3, max: Z3) {
         overlaps(min.d2, max.d2, r.min.d2, r.max.d2)
 
   private def overlaps(a1: Int, a2: Int, b1: Int, b2: Int) = math.max(a1, b1) <= math.min(a2, b2)
-
-
 }
