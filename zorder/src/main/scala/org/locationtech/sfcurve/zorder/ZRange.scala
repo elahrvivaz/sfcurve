@@ -48,62 +48,38 @@ object Z3Range {
 
 case class Z2Range(min: Long, max: Long) extends ZRange[Z2Range] {
 
-  lazy private val min0 = Z2.decode(min, 0)
-  lazy private val min1 = Z2.decode(min, 1)
-  lazy private val max0 = Z2.decode(max, 0)
-  lazy private val max1 = Z2.decode(max, 1)
+  private val minz = Z2(min)
+  private val maxz = Z2(max)
 
   override def containsInUserSpace(z: Long): Boolean = {
-    val z0 = Z2.decode(z, 0)
-    if (z0 < min0 || z0 > max0) { false } else {
-      val z1 = Z2.decode(z, 1)
-      z1 >= min1 && z1 <= max1
-    }
+    val (x, y) = Z2(z).decode
+    x >= minz.d0 && x <= maxz.d0 && y >= minz.d1 && y <= maxz.d1
   }
 
   override def overlapsInUserSpace(r: Z2Range): Boolean = {
-    val rmin0 = Z2.decode(r.min, 0)
-    val rmax0 = Z2.decode(r.max, 0)
-    if (math.max(min0, rmin0) > math.min(max0, rmax0)) { false } else {
-      val rmin1 = Z2.decode(r.min, 1)
-      val rmax1 = Z2.decode(r.max, 1)
-      math.max(min1, rmin1) <= math.min(max1, rmax1)
-    }
+    overlaps(minz.d0, maxz.d0, Z2(r.min).d0, Z2(r.max).d0) &&
+        overlaps(minz.d1, maxz.d1, Z2(r.min).d1, Z2(r.max).d1)
   }
+
+  private def overlaps(a1: Int, a2: Int, b1: Int, b2: Int): Boolean =
+    math.max(a1, b1) <= math.min(a2, b2)
 }
 
 case class Z3Range(min: Long, max: Long) extends ZRange[Z3Range] {
 
-  lazy private val min0 = Z3.decode(min, 0)
-  lazy private val min1 = Z3.decode(min, 1)
-  lazy private val min2 = Z3.decode(min, 2)
-  lazy private val max0 = Z3.decode(max, 0)
-  lazy private val max1 = Z3.decode(max, 1)
-  lazy private val max2 = Z3.decode(max, 2)
+  private val minz = Z3(min)
+  private val maxz = Z3(max)
 
-  override def containsInUserSpace(z: Long): Boolean = {
-    val z0 = Z3.decode(z, 0)
-    if (z0 < min0 || z0 > max0) { false } else {
-      val z1 = Z3.decode(z, 1)
-      if (z1 < min1 || z1 > max1) { false } else {
-        val z2 = Z3.decode(z, 2)
-        z2 >= min2 && z2 <= max2
-      }
-    }
+  override def containsInUserSpace(zv: Long): Boolean = {
+    val (x, y, z) = Z3(zv).decode
+    x >= minz.d0 && x <= maxz.d0 && y >= minz.d1 && y <= maxz.d1 && z >= minz.d2 && z <= maxz.d2
   }
 
-  override def overlapsInUserSpace(r: Z3Range): Boolean = {
-    val rmin0 = Z3.decode(r.min, 0)
-    val rmax0 = Z3.decode(r.max, 0)
-    if (math.max(min0, rmin0) > math.min(max0, rmax0)) { false } else {
-      val rmin1 = Z3.decode(r.min, 1)
-      val rmax1 = Z3.decode(r.max, 1)
-      if (math.max(min1, rmin1) > math.min(max1, rmax1)) { false } else {
-        val rmin2 = Z3.decode(r.min, 2)
-        val rmax2 = Z3.decode(r.max, 2)
-        math.max(min2, rmin2) <= math.min(max2, rmax2)
-      }
-    }
-  }
+  override def overlapsInUserSpace(r: Z3Range): Boolean =
+    overlaps(minz.d0, maxz.d0, Z3(r.min).d0, Z3(r.max).d0) &&
+      overlaps(minz.d1, maxz.d1, Z3(r.min).d1, Z3(r.max).d1) &&
+      overlaps(minz.d2, maxz.d2, Z3(r.min).d2, Z3(r.max).d2)
+
+  private def overlaps(a1: Int, a2: Int, b1: Int, b2: Int) = math.max(a1, b1) <= math.min(a2, b2)
 }
 
