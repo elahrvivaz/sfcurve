@@ -130,7 +130,7 @@ object Z3 {
               maxRecurse: Option[Int] = None): Seq[IndexRange] = {
 
     // calculate the common prefix in the z-values - we start processing with the first diff
-    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min.z, b.max.z)): _*)
+    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min, b.max)): _*)
 
     val rangeStop = maxRanges.getOrElse(Int.MaxValue)
     val recurseStop = maxRecurse.getOrElse(7)
@@ -168,11 +168,11 @@ object Z3 {
     def checkValue(prefix: Long, oct: Long): Unit = {
       val min: Long = prefix | (oct << offset) // QR + 000...
       val max: Long = min | (1L << offset) - 1 // QR + 111...
-      val octRange = Z3Range(new Z3(min), new Z3(max))
+      val octRange = Z3Range(min, max)
 
       if (isContained(octRange) || offset < 64 - precision) {
         // whole range matches, happy day
-        ranges.add(IndexRange(octRange.min.z, octRange.max.z, contained = true))
+        ranges.add(IndexRange(octRange.min, octRange.max, contained = true))
       } else if (overlaps(octRange)) {
         // some portion of this range is excluded
         // queue up each sub-range for processing
@@ -304,18 +304,18 @@ object Z3 {
    * @param inRange: is xd in query range
    */
   def cut(r: Z3Range, xd: Z3, inRange: Boolean): List[Z3Range] = {
-    if (r.min.z == r.max.z) {
+    if (r.min == r.max) {
       Nil
     } else if (inRange) {
-      if (xd.z == r.min.z)      // degenerate case, two nodes min has already been counted
+      if (xd.z == r.min)      // degenerate case, two nodes min has already been counted
         Z3Range(r.max, r.max) :: Nil
-      else if (xd.z == r.max.z) // degenerate case, two nodes max has already been counted
+      else if (xd.z == r.max) // degenerate case, two nodes max has already been counted
         Z3Range(r.min, r.min) :: Nil
       else
-        Z3Range(r.min, xd - 1) :: Z3Range(xd + 1, r.max) :: Nil
+        Z3Range(r.min, xd.z - 1) :: Z3Range(xd.z + 1, r.max) :: Nil
     } else {
-      val (litmax, bigmin) = Z3.zdivide(xd, r.min, r.max)
-      Z3Range(r.min, litmax) :: Z3Range(bigmin, r.max) :: Nil
+      val (litmax, bigmin) = Z3.zdivide(xd, Z3(r.min), Z3(r.max))
+      Z3Range(r.min, litmax.z) :: Z3Range(bigmin.z, r.max) :: Nil
     }
   }
 

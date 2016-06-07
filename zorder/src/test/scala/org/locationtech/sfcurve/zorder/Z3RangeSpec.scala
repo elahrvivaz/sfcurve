@@ -4,6 +4,8 @@ import org.scalatest._
 
 class Z3RangeSpec extends FunSpec with Matchers {
 
+  implicit def zToLong(z: Z3): Long = z.z
+
   describe("Z3Range") {
 
     val zmin = Z3(2, 2, 0)

@@ -115,7 +115,7 @@ object Z2 {
               maxRecurse: Option[Int] = None): Seq[IndexRange] = {
 
     // calculate the common prefix in the z-values - we start processing with the first diff
-    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min.z, b.max.z)): _*)
+    val ZPrefix(commonPrefix, commonBits) = longestCommonPrefix(zbounds.flatMap(b => Seq(b.min, b.max)): _*)
 
     val rangeStop = maxRanges.getOrElse(Int.MaxValue)
     val recurseStop = maxRecurse.getOrElse(7)
@@ -153,11 +153,11 @@ object Z2 {
     def checkValue(prefix: Long, quad: Long): Unit = {
       val min: Long = prefix | (quad << offset) // QR + 000...
       val max: Long = min | (1L << offset) - 1 // QR + 111...
-      val octRange = Z2Range(new Z2(min), new Z2(max))
+      val octRange = Z2Range(min, max)
 
       if (isContained(octRange) || offset < 64 - precision) {
         // whole range matches, happy day
-        ranges.add(IndexRange(octRange.min.z, octRange.max.z, contained = true))
+        ranges.add(IndexRange(octRange.min, octRange.max, contained = true))
       } else if (overlaps(octRange)) {
         // some portion of this range is excluded
         // queue up each sub-range for processing

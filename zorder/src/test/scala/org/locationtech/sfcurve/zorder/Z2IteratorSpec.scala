@@ -11,6 +11,9 @@ package org.locationtech.sfcurve.zorder
 import org.scalatest._
 
 class Z2IteratorSpec extends FunSpec with Matchers {
+
+  implicit def zToLong(z: Z2): Long = z.z
+
   describe("Z2IteratorRange") {
 
     it("iterates"){
@@ -63,6 +66,7 @@ class Z2Iterator(min: Z2, max: Z2) extends Iterator[Z2] {
  * This is a mock class.
  */
 case class ZdivideIterator(min: Z2, max: Z2) extends Z2Iterator(min, max)  {
+  implicit def zToLong(z: Z2): Long = z.z
   val MAX_MISSES = 10
   val range = Z2Range(min, max)
   var haveNext = false
